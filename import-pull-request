@@ -1,0 +1,246 @@
+#! /usr/bin/env python
+
+# This is free and unencumbered software released into the public domain.
+# For more information: http://unlicense.org/
+
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+if sys.version_info >= (3,):
+    from shlex import quote as shell_quote
+    from urllib.request import urlopen
+else:
+    from pipes import quote as shell_quote
+    from urllib2 import urlopen
+
+from bs4 import BeautifulSoup
+
+class Die(Exception):
+    pass
+
+def main():
+    try:
+        _main()
+    except Die as e:
+        sys.stderr.write('Error: {}\n'.format(e))
+        sys.exit(1)
+
+def _main():
+    prog_name, args = sys.argv[0], sys.argv[1:]
+
+    if len(args) != 2:
+        sys.stderr.write("\n"
+                         "Usage: {} <github-pull-request-url> <new-local-branch>\n"
+                         "\n"
+                         "For more help: https://github.com/cakoose/import-pull-request\n"
+                         "\n"
+                         .format(prog_name))
+        sys.exit(1)
+
+    pr_url, new_local_branch = args
+
+    if not pr_url.startswith("https://github.com/"):
+        raise Die("Invalid pull request URL; "
+                  "doesn't start with \"https://github.com/\": {!r}".format(pr_url))
+
+    if not os.path.isdir(".git"):
+        raise Die("Couldn't find \".git\" folder in current working directory.  "
+                  "You must run this command from the top-level folder of a Git checkout.")
+
+    local_changes = run_get_string("git", "status", "--porcelain")
+    if len(local_changes) != 0:
+        raise Die("You currently have local changes.  This script requires a clean repo.")
+
+    local_branches = [l[2:] for l in run_get_string("git", "branch", "-l").splitlines()]
+    if new_local_branch in local_branches:
+        raise Die("Local branch {} already exists.".format(devq(new_local_branch)))
+
+    print("Getting pull request page...")
+    pr_page = urlopen(pr_url).read()
+    pr_id, target_repo, target_branch, source_repo, source_branch = parse_pr_page(pr_page)
+
+    remote = pick_remote(target_repo)
+
+    source_repo_url = "git@github.com:{}.git".format(source_repo)
+    run_echo("git", "fetch", source_repo_url, source_branch+":"+new_local_branch)
+    run_echo("git", "branch", "-u", remote+"/"+target_branch, new_local_branch)
+    run_echo("git", "checkout", new_local_branch)
+
+    print("Appending \"Closes {}\" to commit message...".format(pr_id))
+    last_commit_message = run_get_bytes("git", "show", "-s", "--format=%B", "HEAD")
+    pr_id_bytes = pr_id.encode('ascii')
+    run("git", "commit", "--amend", "-m", last_commit_message + b"Closes {}".format(pr_id_bytes))
+
+def run(*command):
+    try:
+        subprocess.check_output(command, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        sys.stderr.write(e.output)
+        raise Die("[Command failed.]")
+
+def run_echo(*command):
+    print("# " + ' '.join(map(shell_quote, command)))
+    run(*command)
+
+def run_get_string(*command):
+    # TODO: use system default encoding?
+    return run_get_bytes(*command).decode('utf-8')
+
+def run_get_bytes(*command):
+    return subprocess.check_output(command)
+
+def pick_remote(target_repo):
+    fetch = set()
+    push = set()
+    try:
+        for line in run_get_string("git", "remote", "-v").splitlines():
+            m = GIT_REMOTE_V_MATCHER.match(line)
+            if m is None:
+                raise Die("Couldn't parse line: {}".format(devq(line)))
+            remote, repo_url, mode = m.group(1), m.group(2), m.group(3)
+
+            if mode == 'fetch':
+                target_set = fetch
+            elif mode == 'push':
+                target_set = push
+            else:
+                raise AssertionError(repr(mode))
+
+            m = GITHUB_REPO_URL_MATCHER.match(repo_url)
+            if m is not None and m.group(1) == target_repo:
+                target_set.add(remote)
+    except Die as e:
+        raise Die("Unable to determine this repo's list of remotes: {}".format(e))
+
+    both = fetch & push
+
+    if 'origin' in both:
+        return 'origin'
+
+    if len(both) == 0:
+        raise Die("This repo doesn't have any remotes that push and fetch from {}."
+                  .format(devq(target_repo)))
+    if len(both) > 1:
+        raise Die("This repo has more than remote that pushes and fetches from {}: {}.  "
+                  "Not sure which one to use.".format(devq(target_repo), devql(both)))
+    return next(iter(both))
+
+GIT_REMOTE_V_MATCHER = re.compile(r'([^ ]+)\t([^ ]+) \((fetch|push)\)$')
+GITHUB_REPO_URL_MATCHER = re.compile(r'(?:git@github\.com:|https://github\.com/)(.*)\.git$')
+
+def parse_pr_page(pr_page):
+    bs = BeautifulSoup(pr_page)
+    assert bs is not None
+
+    # Figure out the pull request ID
+
+    try:
+        def f(tag):
+            if not PULL_REQUEST_ID_MATCHER.match(tag.text):
+                raise ValueError("Expecting pull request ID (ex: \"#1234\"), got {}."
+                                 .format(devq(tag.text)))
+            return tag.text
+        pr_id = find_one(bs, 'span', 'gh-header-number', f)
+    except ValueError as e:
+        raise Die("Couldn't figure out pull request ID: {}".format(e))
+
+    # Figure out target repo
+
+    try:
+        def f(tag):
+            href = tag.attrs.get('href')
+            if href is None:
+                raise ValueError("Missing \"href\" attribute.")
+            m = REPO_HREF_MATCHER.match(href)
+            if m is None:
+                raise ValueError("Doesn't look like a repo link: {}.".format(devq(href)))
+            return m.group(1), m.group(2)
+        target_troup, target_sub = find_one(bs, 'a', 'js-current-repository', f)
+    except ValueError as e:
+        raise Die("Couldn't figure out repo URL: {}".format(e))
+
+    # Figure out source/target branches
+
+    branch_refs = []
+    for tag in bs.find_all('span', class_='commit-ref'):
+        parts = list(tag.strings)
+        if len(parts) != 3 or parts[1] != ':':
+            raise Die("Couldn't parse branch info from class=\"commit-ref\" span: {}"
+                      .format(devql(parts)))
+        branch_refs.append((parts[0], parts[2]))
+
+    if len(branch_refs) != 2:
+        raise Die("Expecting two spans with class=\"commit-ref\", got {}."
+                  .format(len(branch_refs)))
+
+    (target_group, target_branch), (source_group, source_branch) = branch_refs
+
+    # Figure out source repo
+
+    def extract_repo(href):
+        m = COMMIT_HREF_MATCHER.match(href)
+        if m is None:
+            raise ValueError("doesn't look like a commit link")
+        return m.group(1), m.group(2)
+    source_group_again, source_sub = href_consensus(
+        bs, 'commit-id', "pull request repo", extract_repo)
+
+    if source_group != source_group_again:
+        raise Die("Confused about the source user/organization: {} or {}?"
+                  .format(devq(source_group), devq(source_group_again)))
+
+    target_repo = target_group + "/" + target_sub
+    source_repo = source_group + "/" + source_sub
+
+    return pr_id, target_repo, target_branch, source_repo, source_branch
+
+def find_one(bs, tag_name, tag_class, f):
+    tags = bs.find_all(tag_name, class_=tag_class)
+    if len(tags) == 0:
+        raise ValueError("Couldn't find <{}> with class=\"{}\">.".format(tag_name, tag_class))
+    if len(tags) > 1:
+        raise ValueError("Expecting only one <{}> with class=\"{}\">, got {}."
+                         .format(tag_name, tag_class, len(tags)))
+    try:
+        return f(tags[0])
+    except ValueError as e:
+        raise ValueError("<{}> with class=\"{}\": {}".format(tag_name, tag_class, e))
+
+def href_consensus(bs, tag_class, description, transform):
+    assert bs is not None
+    unique_values = set()
+    try:
+        for l in bs.find_all('a', class_=tag_class):
+            href = l.get('href')
+            if href is not None:
+                try:
+                    unique_values.add(transform(href))
+                except ValueError as e:
+                    raise Die("invalid href: {}: {}".format(devq(href), e))
+        if len(unique_values) == 0:
+            raise Die("no links found.")
+        if len(unique_values) > 1:
+            raise Die("inconsistent values: {}".format(devql(unique_values)))
+    except Die as e:
+        raise Die("Unable to determiine {} from pull request page's class={} links; {}"
+                  .format(description, devq(tag_class), e))
+    return next(iter(unique_values))
+
+def devq(s):
+    return json.dumps(s)
+
+def devql(l):
+    assert len(l) > 0
+    return ", ".join(map(devq, l))
+
+REPO_HREF_MATCHER = re.compile(r'/([^/]+)/([^/]+)$')
+COMMIT_HREF_MATCHER = re.compile(r'/([^/]+)/([^/]+)/commit/[0-9a-f]+$')
+PULL_REQUEST_ID_MATCHER = re.compile(r'#[0-9]+$')
+
+if __name__ == '__main__':
+    main()
