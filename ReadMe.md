@@ -2,13 +2,10 @@
 
 This script makes it easy to handle pull requests in a way that:
 
-1. Avoids the extra merge commit.  If you love merge commits, I can't help you.
+1. Avoids the merge commit.  If you love merge commits, I can't help you.
 2. Lets you tweak the changes and commit message, but preserves the original commit's "Author" field.
 
-Requirements:
-
-* Python 3.4+ or 2.7
-* BeautifulSoup 4 (`pip install beautifulsoup4`)
+Requires Python 3.4+ or 2.7
 
 Installation:
 
@@ -34,11 +31,16 @@ The commits from the pull request are now in "temp-branch".
     - If it doesn't rebase cleanly and you're not willing to deal with it yourself, tell the author to rebase their pull request.
 2. Test the changes.
     - If something is broken and you're not willing to fix it yourself, tell the author to fix it.
-3. Squash the commits and tweak the commit message:
+3. Make any changes you need to make.  Feel free to make additional commits.
+4. Squash the commits and tweak the commit message:
     - `git rebase -i`
-    - Your editor will pop up.  If there is more than one commit, change "pick" to "squash" for all but the top-most one.  If there is only one commit, change the "pick" to "reword".  Save and quit.
-    - Your editor will pop up again.  Write a clean commit message.  Keep the "Closes #123" line at the end; it tells GitHub to [auto-close](https://help.github.com/articles/closing-issues-via-commit-messages/) the pull request when you finally push the commit.  Save and quit.
-4. Make any tweaks you need to make (comments, code style, changelog, etc).
-    - Use `git commit --amend` to add these changes to the commit; this preserves the original commit's "Author" field.
+    - Your editor will pop up.
+        - If there is only one commit, change the "pick" to "reword".
+        - If there are multiple commits, change "pick" to "squash" for all but the first.
+        - Save and quit.
+    - Your editor will pop up again.
+        - Write a clean commit message.
+        - Keep the "Closes #123" line at the end; it tells GitHub to [auto-close](https://help.github.com/articles/closing-issues-via-commit-messages/) the pull request.
+        - Save and quit.
 5. Push the commit to main repo: `git push`
 6. Delete the local branch: `git checkout master; git branch -d temp-branch`
