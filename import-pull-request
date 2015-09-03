@@ -14,9 +14,14 @@ import sys
 if sys.version_info >= (3,):
     from shlex import quote as shell_quote
     from urllib.request import urlopen
+    def write_bytes(stream, b):
+        assert isinstance(b, bytes)
+        stream.buffer.write(b)
 else:
     from pipes import quote as shell_quote
     from urllib2 import urlopen
+    def write_bytes(stream, b):
+        stream.write(b)
 
 class Die(Exception):
     pass
@@ -81,8 +86,8 @@ def run(*command):
     try:
         subprocess.check_output(command, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-        sys.stderr.write(e.output)
-        raise Die("[Command failed: {}]".format(' '.join(map, shell_quote, command)))
+        write_bytes(sys.stderr, e.output)
+        raise Die("[Command failed: {}]".format(' '.join(map(shell_quote, command))))
 
 PR_URL_MATCHER = re.compile("https://github.com/([-_A-Za-z0-9]+/[-_A-Za-z0-9]+)/pull/([0-9]+)")
 
