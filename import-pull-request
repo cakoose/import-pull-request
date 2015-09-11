@@ -64,12 +64,13 @@ def _main():
         raise Die("Local branch {} already exists.".format(devq(new_local_branch)))
 
     target_repo, pr_num = parse_pr_url(pr_url)
-    remote = pick_remote(target_repo)
+    remote, supports_ssh = pick_remote(target_repo)
 
     title, state, target_branch, source_repo, source_branch = fetch_pr_info(target_repo, pr_num)
 
     print(devq(title))
-    source_repo_url = "git@github.com:{}.git".format(source_repo)
+    prefix = GITHUB_SHORT_SSH_PREFIX if supports_ssh else GITHUB_HTTPS_PREFIX
+    source_repo_url = prefix + source_repo + '.git'
     run("git", "fetch", source_repo_url, source_branch+":"+new_local_branch)
     run("git", "branch", "-u", remote+"/"+target_branch, new_local_branch)
     run("git", "checkout", new_local_branch)
@@ -137,8 +138,15 @@ def run_get_bytes(*command):
     return subprocess.check_output(command)
 
 def pick_remote(target_repo):
+    """
+    For the Git repo we're currently in, find the remote that both fetches and pulls from
+    'target_repo' (which should be of the form "username/reponame").
+
+    Also return whether the remote uses an SSH URL.
+    """
     fetch = set()
     push = set()
+    ssh_remotes = set()
     try:
         for line in run_get_string("git", "remote", "-v").splitlines():
             m = GIT_REMOTE_V_MATCHER.match(line)
@@ -153,7 +161,17 @@ def pick_remote(target_repo):
             else:
                 raise AssertionError(repr(mode))
 
-            m = GITHUB_REPO_URL_MATCHER.match(repo_url)
+            for (prefix, is_ssh) in GITHUB_URL_PREFIXES:
+                if repo_url.startswith(prefix):
+                    repo_name = repo_url[len(prefix):]
+                    if repo_name.endswith('.git'):  # GitHub doesn't allow ending in ".git"
+                        repo_name = repo_name[:-len('.git')]
+                    if repo_name == target_repo:
+                        target_set.add(remote)
+                        if is_ssh:
+                            ssh_remotes.add(remote)
+                    break
+
             if m is not None and m.group(1) == target_repo:
                 target_set.add(remote)
     except Die as e:
@@ -162,18 +180,30 @@ def pick_remote(target_repo):
     both = fetch & push
 
     if 'origin' in both:
-        return 'origin'
+        remote = 'origin'
+    else:
+        if len(both) == 0:
+            raise Die("This repo doesn't have any remotes that push and fetch from {} using "
+                      "HTTPS or SSH.  (Use \"git remote -v\" to see the list.)"
+                      .format(devq(target_repo)))
+        if len(both) > 1:
+            raise Die("This repo has more than remote that pushes and fetches from {}: {}.  "
+                      "Not sure which one to use.".format(devq(target_repo), devql(both)))
+        remote = next(iter(both))
 
-    if len(both) == 0:
-        raise Die("This repo doesn't have any remotes that push and fetch from {}."
-                  .format(devq(target_repo)))
-    if len(both) > 1:
-        raise Die("This repo has more than remote that pushes and fetches from {}: {}.  "
-                  "Not sure which one to use.".format(devq(target_repo), devql(both)))
-    return next(iter(both))
+    return remote, (remote in ssh_remotes)
 
 GIT_REMOTE_V_MATCHER = re.compile(r'([^ ]+)\t([^ ]+) \((fetch|push)\)$')
-GITHUB_REPO_URL_MATCHER = re.compile(r'(?:git@github\.com:|https://github\.com/)(.*)\.git$')
+
+GITHUB_SSH_PREFIX = 'ssh://github.com/'
+GITHUB_HTTPS_PREFIX = 'https://github.com/'
+GITHUB_SHORT_SSH_PREFIX = 'git@github.com:'
+
+GITHUB_URL_PREFIXES = (
+    (GITHUB_SSH_PREFIX, True),  # True = "it's an SSH URL"
+    (GITHUB_HTTPS_PREFIX, False),
+    (GITHUB_SHORT_SSH_PREFIX, True),
+)
 
 def devq(s):
     return json.dumps(s)
