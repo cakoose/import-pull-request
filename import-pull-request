@@ -88,7 +88,8 @@ def run(*command):
         write_bytes(sys.stderr, e.output)
         raise Die("[Command failed: {}]".format(' '.join(map(shell_quote, command))))
 
-PR_URL_MATCHER = re.compile("https://github.com/([-_A-Za-z0-9]+/[-_A-Za-z0-9]+)/pull/([0-9]+)")
+PR_URL_MATCHER = re.compile(
+    r"^https://github.com/([-_A-Za-z0-9]+/[-_A-Za-z0-9]+)/pull/([0-9]+)(?:/.*)?$")
 
 def parse_pr_url(pr_url):
     m = PR_URL_MATCHER.match(pr_url)
