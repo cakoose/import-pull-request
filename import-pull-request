@@ -64,14 +64,12 @@ def _main():
         raise Die("Local branch {} already exists.".format(devq(new_local_branch)))
 
     target_repo, pr_num = parse_pr_url(pr_url)
-    remote, supports_ssh = pick_remote(target_repo)
+    remote = pick_remote(target_repo)
 
-    title, state, target_branch, source_repo, source_branch = fetch_pr_info(target_repo, pr_num)
+    title, state, target_branch = fetch_pr_info(target_repo, pr_num)
 
     print(devq(title))
-    prefix = GITHUB_SHORT_SSH_PREFIX if supports_ssh else GITHUB_HTTPS_PREFIX
-    source_repo_url = prefix + source_repo + '.git'
-    run("git", "fetch", source_repo_url, source_branch+":"+new_local_branch)
+    run("git", "fetch", remote, "refs/pull/{}/head:{}".format(pr_num, new_local_branch))
     run("git", "branch", "-u", remote+"/"+target_branch, new_local_branch)
     run("git", "checkout", new_local_branch)
 
@@ -125,10 +123,8 @@ def fetch_pr_info(target_repo, pr_num):
     title = api_data["title"]
     state = api_data["state"]
     target_branch = api_data["base"]["ref"]
-    source_repo = api_data["head"]["repo"]["full_name"]
-    source_branch = api_data["head"]["ref"]
 
-    return title, state, target_branch, source_repo, source_branch
+    return title, state, target_branch
 
 def run_get_string(*command):
     # TODO: use system default encoding?
@@ -141,12 +137,9 @@ def pick_remote(target_repo):
     """
     For the Git repo we're currently in, find the remote that both fetches and pulls from
     'target_repo' (which should be of the form "username/reponame").
-
-    Also return whether the remote uses an SSH URL.
     """
     fetch = set()
     push = set()
-    ssh_remotes = set()
     try:
         for line in run_get_string("git", "remote", "-v").splitlines():
             m = GIT_REMOTE_V_MATCHER.match(line)
@@ -168,8 +161,6 @@ def pick_remote(target_repo):
                         repo_name = repo_name[:-len('.git')]
                     if repo_name == target_repo:
                         target_set.add(remote)
-                        if is_ssh:
-                            ssh_remotes.add(remote)
                     break
 
             if m is not None and m.group(1) == target_repo:
@@ -191,7 +182,7 @@ def pick_remote(target_repo):
                       "Not sure which one to use.".format(devq(target_repo), devql(both)))
         remote = next(iter(both))
 
-    return remote, (remote in ssh_remotes)
+    return remote
 
 GIT_REMOTE_V_MATCHER = re.compile(r'([^ ]+)\t([^ ]+) \((fetch|push)\)$')
 
