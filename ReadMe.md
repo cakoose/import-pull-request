@@ -25,6 +25,8 @@ Let's say someone sent you a pull request.  Copy the pull request page's URL.
 import-pull-request https://github.com/user/repo/pull/123 temp-branch
 ```
 
+(If you don't specify a local branch name, the name "pr-123" will be used by default.)
+
 The commits from the pull request are now in "temp-branch".
 
 1. Rebase the commits: `git pull --rebase`.

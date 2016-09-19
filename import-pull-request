@@ -36,16 +36,22 @@ def main():
 def _main():
     prog_name, args = sys.argv[0], sys.argv[1:]
 
-    if len(args) != 2:
+    if len(args) == 0:
         sys.stderr.write("\n"
-                         "Usage: {} <github-pull-request-url> <new-local-branch>\n"
+                         "Usage: {} <github-pull-request-url> [new-local-branch]\n"
                          "\n"
                          "For more help: https://github.com/cakoose/import-pull-request\n"
                          "\n"
                          .format(prog_name))
         sys.exit(1)
 
-    pr_url, new_local_branch = args
+    if len(args) == 1:
+        pr_url, new_local_branch = args[0], None
+    elif len(args) == 2:
+        pr_url, new_local_branch = args
+    else:
+        sys.stderr.write("Too many arguments.  Run with no arguments for help.\n")
+        sys.exit(1)
 
     if not pr_url.startswith("https://github.com/"):
         raise Die("Invalid pull request URL; "
@@ -59,12 +65,15 @@ def _main():
     if len(local_changes) != 0:
         raise Die("You currently have local changes.  This script requires a clean repo.")
 
+    target_repo, pr_num = parse_pr_url(pr_url)
+    remote = pick_remote(target_repo)
+
+    if new_local_branch is None:
+        new_local_branch = "pr-{}".format(pr_num)
+
     local_branches = [l[2:] for l in run_get_string("git", "branch", "-l").splitlines()]
     if new_local_branch in local_branches:
         raise Die("Local branch {} already exists.".format(devq(new_local_branch)))
-
-    target_repo, pr_num = parse_pr_url(pr_url)
-    remote = pick_remote(target_repo)
 
     title, state, target_branch = fetch_pr_info(target_repo, pr_num)
 
