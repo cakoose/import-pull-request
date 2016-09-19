@@ -55,7 +55,7 @@ def _main():
 
     if not pr_url.startswith("https://github.com/"):
         raise Die("Invalid pull request URL; "
-                  "doesn't start with \"https://github.com/\": {!r}".format(pr_url))
+                  "doesn't start with \"https://github.com/\": {}".format(devq(pr_url)))
 
     if not os.path.isdir(".git"):
         raise Die("Couldn't find \".git\" folder in current working directory.  "
