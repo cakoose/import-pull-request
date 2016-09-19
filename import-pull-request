@@ -57,10 +57,6 @@ def _main():
         raise Die("Invalid pull request URL; "
                   "doesn't start with \"https://github.com/\": {}".format(devq(pr_url)))
 
-    if not os.path.isdir(".git"):
-        raise Die("Couldn't find \".git\" folder in current working directory.  "
-                  "You must run this command from the top-level folder of a Git checkout.")
-
     local_changes = run_get_string("git", "status", "--porcelain")
     if len(local_changes) != 0:
         raise Die("You currently have local changes.  This script requires a clean repo.")
@@ -92,7 +88,7 @@ def _main():
 
 def run(*command):
     try:
-        subprocess.check_output(command, stderr=subprocess.STDOUT)
+        return subprocess.check_output(command, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         write_bytes(sys.stderr, e.output)
         raise Die("[Command failed: {}]".format(' '.join(map(shell_quote, command))))
@@ -141,7 +137,7 @@ def run_get_string(*command):
     return run_get_bytes(*command).decode('utf-8')
 
 def run_get_bytes(*command):
-    return subprocess.check_output(command)
+    return run(*command)
 
 def pick_remote(target_repo):
     """
