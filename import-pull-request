@@ -53,11 +53,11 @@ def _main():
         sys.stderr.write("Too many arguments.  Run with no arguments for help.\n")
         sys.exit(1)
 
-    if not pr_url.startswith("https://github.com/"):
+    if not pr_url.startswith('https://github.com/'):
         raise Die("Invalid pull request URL; "
                   "doesn't start with \"https://github.com/\": {}".format(devq(pr_url)))
 
-    local_changes = run_get_string("git", "status", "--porcelain")
+    local_changes = run_get_string('git', 'status', '--porcelain')
     if len(local_changes) != 0:
         raise Die("You currently have local changes.  This script requires a clean repo.")
 
@@ -65,25 +65,25 @@ def _main():
     remote = pick_remote(target_repo)
 
     if new_local_branch is None:
-        new_local_branch = "pr-{}".format(pr_num)
+        new_local_branch = 'pr-{}'.format(pr_num)
 
-    local_branches = [l[2:] for l in run_get_string("git", "branch", "-l").splitlines()]
+    local_branches = [l[2:] for l in run_get_string('git', 'branch', '-l').splitlines()]
     if new_local_branch in local_branches:
         raise Die("Local branch {} already exists.".format(devq(new_local_branch)))
 
     title, state, target_branch = fetch_pr_info(target_repo, pr_num)
 
     print(devq(title))
-    run("git", "fetch", remote, "refs/pull/{}/head:{}".format(pr_num, new_local_branch))
-    run("git", "branch", "-u", remote+"/"+target_branch, new_local_branch)
-    run("git", "checkout", new_local_branch)
+    run('git', 'fetch', remote, 'refs/pull/{}/head:{}'.format(pr_num, new_local_branch))
+    run('git', 'branch', '-u', remote+'/'+target_branch, new_local_branch)
+    run('git', 'checkout', new_local_branch)
 
-    last_commit_message = run_get_bytes("git", "show", "-s", "--format=%B", "HEAD")
+    last_commit_message = run_get_bytes('git', 'show', '-s', '--format=%B', 'HEAD')
     pr_ref = "Closes #{}".format(pr_num)
-    run("git", "commit", "--amend", "-m", last_commit_message + pr_ref.encode('ascii'))
+    run('git', 'commit', '--amend', '-m', last_commit_message + pr_ref.encode('ascii'))
 
     print("Switched to local branch {}.".format(devq(new_local_branch)))
-    if state != "open":
+    if state != 'open':
         print("WARNING: Pull request is marked {}.".format(devq(state)))
 
 def run(*command):
@@ -94,7 +94,7 @@ def run(*command):
         raise Die("[Command failed: {}]".format(' '.join(map(shell_quote, command))))
 
 PR_URL_MATCHER = re.compile(
-    r"^https://github.com/([-_A-Za-z0-9]+/[-_A-Za-z0-9]+)/pull/([0-9]+)(?:/.*)?$")
+    r'^https://github.com/([-_A-Za-z0-9]+/[-_A-Za-z0-9]+)/pull/([0-9]+)(?:/.*)?$')
 
 def parse_pr_url(pr_url):
     m = PR_URL_MATCHER.match(pr_url)
@@ -106,7 +106,7 @@ def parse_pr_url(pr_url):
     return target_repo, pr_num
 
 def fetch_pr_info(target_repo, pr_num):
-    api_pr_url = "https://api.github.com/repos/{}/pulls/{}".format(target_repo, pr_num)
+    api_pr_url = 'https://api.github.com/repos/{}/pulls/{}'.format(target_repo, pr_num)
     try:
         api_pr_page = urlopen(api_pr_url).read()
     except (OSError, IOError) as e:
@@ -116,8 +116,8 @@ def fetch_pr_info(target_repo, pr_num):
     except ValueError as e:
         raise Die("Couldn't parse page {}: {}".format(devq(api_pr_url), e))
 
-    target_repo_from_page = api_data["base"]["repo"]["full_name"]
-    pr_num_from_page = api_data["number"]
+    target_repo_from_page = api_data['base']['repo']['full_name']
+    pr_num_from_page = api_data['number']
 
     if target_repo != target_repo_from_page:
         raise Die("Target repo mismatch.  Pull request URL has {}, but pull request page "
@@ -126,9 +126,9 @@ def fetch_pr_info(target_repo, pr_num):
         raise Die("Pull request number mismatch.  Pull request URL has {}, but pull request page "
                   "contents has {}.".format(pr_num, pr_num_from_page))
 
-    title = api_data["title"]
-    state = api_data["state"]
-    target_branch = api_data["base"]["ref"]
+    title = api_data['title']
+    state = api_data['state']
+    target_branch = api_data['base']['ref']
 
     return title, state, target_branch
 
@@ -147,7 +147,7 @@ def pick_remote(target_repo):
     fetch = set()
     push = set()
     try:
-        for line in run_get_string("git", "remote", "-v").splitlines():
+        for line in run_get_string('git', 'remote', '-v').splitlines():
             m = GIT_REMOTE_V_MATCHER.match(line)
             if m is None:
                 raise Die("Couldn't parse line: {}".format(devq(line)))
